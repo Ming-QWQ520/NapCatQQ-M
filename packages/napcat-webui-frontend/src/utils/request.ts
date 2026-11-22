@@ -57,6 +57,16 @@ serverRequest.interceptors.response.use((response) => {
         window.location.reload();
       }
     }
+    // 首次登录未完成改密：跳转到强制改密页（保留登录凭证，改完即恢复）
+    if (response.data.message === 'password_change_required') {
+      const mountIndex = window.location.pathname.indexOf('/webui/');
+      const mountBase = mountIndex >= 0 ? window.location.pathname.slice(0, mountIndex + '/webui'.length) : '';
+      const target = `${mountBase}/web_change_password`;
+      if (!window.location.pathname.startsWith(`${mountBase}/web_change_password`)) {
+        window.location.href = target;
+      }
+      throw new Error('登录后需先修改密码');
+    }
     throw new Error(response.data.message);
   }
 

@@ -1,4 +1,4 @@
-import { webUiPathWrapper, getInitialWebUiToken } from '@/napcat-webui-backend/index';
+import { webUiPathWrapper, getInitialWebUiPassword } from '@/napcat-webui-backend/index';
 import { Type, Static } from '@sinclair/typebox';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
 import { Value } from '@sinclair/typebox/value';
@@ -8,14 +8,20 @@ import { resolve, sep } from 'node:path';
 
 import { deepMerge } from '../utils/object';
 import { themeType } from '../types/theme';
-import { getRandomToken } from '../utils/url';
 
 // 限制尝试端口的次数，避免死循环
 // 定义配置的类型
 const WebUiConfigSchema = Type.Object({
   host: Type.String({ default: '::' }),
   port: Type.Number({ default: 6099 }),
-  token: Type.String({ default: getRandomToken(12) }),
+  // 登录账户（默认 napcat）
+  username: Type.String({ default: 'napcat' }),
+  // 登录密码（首次启动时为空，由服务端生成随机初始密码并写入）
+  password: Type.String({ default: '' }),
+  // 首次登录后是否强制要求修改密码
+  passwordChangeRequired: Type.Boolean({ default: false }),
+  // 旧版单 token 登录的遗留字段，已不再用于鉴权（仅为旧配置文件兼容保留）
+  token: Type.String({ default: '' }),
   loginRate: Type.Number({ default: 10 }),
   autoLoginAccount: Type.String({ default: '' }),
   theme: themeType,
@@ -94,11 +100,11 @@ export class WebUiConfigWrapper {
       const configPath = resolve(webUiPathWrapper.configPath, './webui.json');
       await this.ensureConfigFileExists(configPath);
       const parsedConfig = await this.readAndValidateConfig(configPath);
-      // 使用内存中缓存的token进行覆盖，确保强兼容性
+      // 使用内存中缓存的密码进行覆盖，确保强兼容性
       this.WebUiConfigData = {
         ...parsedConfig,
-        // 首次读取内存中是没有token的，需要进行一层兜底
-        token: getInitialWebUiToken() || parsedConfig.token,
+        // 首次读取内存中是没有密码的，需要进行一层兜底
+        password: getInitialWebUiPassword() || parsedConfig.password,
       };
       return this.WebUiConfigData;
     } catch (e) {
@@ -106,7 +112,7 @@ export class WebUiConfigWrapper {
       const defaultConfig = this.validateAndApplyDefaults({});
       this.WebUiConfigData = {
         ...defaultConfig,
-        token: getInitialWebUiToken() || defaultConfig.token,
+        password: getInitialWebUiPassword() || defaultConfig.password,
       };
       return this.WebUiConfigData;
     }
@@ -150,15 +156,15 @@ export class WebUiConfigWrapper {
     }
   }
 
-  async UpdateToken (oldToken: string, newToken: string): Promise<void> {
-    // 使用内存中缓存的token进行验证，确保强兼容性
-    const cachedToken = getInitialWebUiToken();
-    const tokenToCheck = cachedToken || (await this.GetWebUIConfig()).token;
+  async UpdatePassword (oldPassword: string, newPassword: string): Promise<void> {
+    // 使用内存中缓存的密码进行验证，确保强兼容性
+    const cachedPassword = getInitialWebUiPassword();
+    const passwordToCheck = cachedPassword || (await this.GetWebUIConfig()).password;
 
-    if (tokenToCheck !== oldToken) {
-      throw new Error('旧 token 不匹配');
+    if (passwordToCheck !== oldPassword) {
+      throw new Error('旧密码不匹配');
     }
-    await this.UpdateWebUIConfig({ token: newToken });
+    await this.UpdateWebUIConfig({ password: newPassword });
   }
 
   // 获取日志文件夹路径

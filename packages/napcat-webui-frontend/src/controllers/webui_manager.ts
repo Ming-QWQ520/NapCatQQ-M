@@ -18,11 +18,11 @@ export default class WebUIManager {
     return data.data;
   }
 
-  public static async loginWithToken (token: string, totpCode?: string) {
-    const sha256 = CryptoJS.SHA256(token + '.napcat').toString();
+  public static async loginWithPassword (username: string, password: string, totpCode?: string) {
+    const sha256 = CryptoJS.SHA256(password + '.napcat').toString();
     const { data } = await serverRequest.post<ServerResponse<AuthResponse>>(
       '/auth/login',
-      { hash: sha256, totpCode }
+      { username, hash: sha256, totpCode }
     );
     return data.data;
   }
@@ -57,10 +57,10 @@ export default class WebUIManager {
     return data.data;
   }
 
-  public static async changePassword (oldToken: string, newToken: string) {
-    const { data } = await serverRequest.post<ServerResponse<boolean>>(
-      '/auth/update_token',
-      { oldToken, newToken }
+  public static async updatePassword (oldPassword: string, newPassword: string) {
+    const { data } = await serverRequest.post<ServerResponse<UpdatePasswordResponse>>(
+      '/auth/update_password',
+      { oldPassword, newPassword }
     );
     return data.data;
   }

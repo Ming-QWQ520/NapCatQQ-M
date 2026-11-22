@@ -13,6 +13,7 @@ import useAuth from '@/hooks/auth';
 import store from '@/store';
 
 const WebLoginPage = lazy(() => import('@/pages/web_login'));
+const WebChangePasswordPage = lazy(() => import('@/pages/web_change_password'));
 const IndexPage = lazy(() => import('@/pages/index'));
 const QQLoginPage = lazy(() => import('@/pages/qq_login'));
 const DashboardIndexPage = lazy(() => import('@/pages/dashboard'));
@@ -51,14 +52,7 @@ function AuthChecker ({ children }: { children: React.ReactNode; }) {
 
   useEffect(() => {
     if (!isAuth) {
-      const search = new URLSearchParams(window.location.search);
-      const token = search.get('token');
-      let url = '/web_login';
-
-      if (token) {
-        url += `?token=${token}`;
-      }
-      navigate(url, { replace: true });
+      navigate('/web_login', { replace: true });
     }
   }, [isAuth, navigate]);
 
@@ -86,6 +80,7 @@ function AppRoutes () {
       </Route>
       <Route path='/qq_login' element={<QQLoginPage />} />
       <Route path='/web_login' element={<WebLoginPage />} />
+      <Route path='/web_change_password' element={<WebChangePasswordPage />} />
     </Routes>
   );
 }

@@ -5,33 +5,47 @@ import { TotpHelper } from '@/napcat-webui-backend/src/helper/TotpHelper';
 import { WebUiDataRuntime } from '@/napcat-webui-backend/src/helper/Data';
 import { sendSuccess, sendError } from '@/napcat-webui-backend/src/utils/response';
 import { isEmpty } from '@/napcat-webui-backend/src/utils/check';
-import { WebUiConfig, getInitialWebUiToken, setInitialWebUiToken } from '@/napcat-webui-backend/index';
+import { validateWebUiPassword } from '@/napcat-webui-backend/src/utils/password';
+import {
+  WebUiConfig,
+  getInitialWebUiPassword,
+  setInitialWebUiPassword,
+  getWebUiPasswordChangeRequired,
+  setWebUiPasswordChangeRequired,
+} from '@/napcat-webui-backend/index';
 
-// 登录 - 支持2FA验证
+// 登录 - 账户密码 + 可选2FA验证
 export const LoginHandler: RequestHandler = async (req, res) => {
   // 获取WebUI配置
   const WebUiConfigData = await WebUiConfig.GetWebUIConfig();
-  // 获取请求体中的hash和totpCode
-  const { hash, totpCode } = req.body;
+  // 获取请求体中的账户、密码hash和totpCode
+  const { username, hash, totpCode } = req.body;
   // 获取客户端IP
   const clientIP = req.ip || req.socket.remoteAddress || '';
 
-  // 如果token为空，返回错误信息
+  // 如果账户或密码hash为空，返回错误信息
+  if (isEmpty(username)) {
+    return sendError(res, 'username is empty');
+  }
   if (isEmpty(hash)) {
-    return sendError(res, 'token is empty');
+    return sendError(res, 'password is empty');
   }
   // 检查登录频率
   if (!WebUiDataRuntime.checkLoginRate(clientIP, WebUiConfigData.loginRate)) {
     return sendError(res, 'login rate limit');
   }
-  // 使用启动时缓存的token进行验证，而不是动态读取配置文件
-  const initialToken = getInitialWebUiToken();
-  if (!initialToken) {
-    return sendError(res, 'Server token not initialized');
+  // 使用启动时缓存的密码进行验证，而不是动态读取配置文件
+  const initialPassword = getInitialWebUiPassword();
+  if (!initialPassword) {
+    return sendError(res, 'Server password not initialized');
   }
-  // 验证初始token hash是否等于提交的token hash
-  if (!AuthHelper.comparePasswordHash(initialToken, hash)) {
-    return sendError(res, 'token is invalid');
+  // 验证账户
+  if (!AuthHelper.timingSafeEqualString(username, WebUiConfigData.username || 'napcat')) {
+    return sendError(res, 'username or password is invalid');
+  }
+  // 验证密码hash是否等于提交的密码hash
+  if (!AuthHelper.comparePasswordHash(initialPassword, hash)) {
+    return sendError(res, 'username or password is invalid');
   }
 
   // 检查是否启用了2FA
@@ -54,6 +68,7 @@ export const LoginHandler: RequestHandler = async (req, res) => {
     return sendSuccess(res, {
       Credential: signCredential,
       require2FA: false,
+      passwordChangeRequired: getWebUiPasswordChangeRequired(),
     });
   }
 
@@ -61,6 +76,7 @@ export const LoginHandler: RequestHandler = async (req, res) => {
   const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(hash))).toString('base64');
   return sendSuccess(res, {
     Credential: signCredential,
+    passwordChangeRequired: getWebUiPasswordChangeRequired(),
   });
 };
 
@@ -93,13 +109,13 @@ export const checkHandler: RequestHandler = async (req, res) => {
       return sendError(res, 'Token has been revoked');
     }
 
-    // 使用启动时缓存的token进行验证
-    const initialToken = getInitialWebUiToken();
-    if (!initialToken) {
-      return sendError(res, 'Server token not initialized');
+    // 使用启动时缓存的密码进行验证
+    const initialPassword = getInitialWebUiPassword();
+    if (!initialPassword) {
+      return sendError(res, 'Server password not initialized');
     }
     // 验证凭证是否在一小时内有效
-    const valid = AuthHelper.validateCredentialWithinOneHour(initialToken, Credential);
+    const valid = AuthHelper.validateCredentialWithinOneHour(initialPassword, Credential);
     // 返回成功信息
     if (valid) return sendSuccess(res, null);
     // 返回错误信息
@@ -110,66 +126,67 @@ export const checkHandler: RequestHandler = async (req, res) => {
   }
 };
 
-// 修改密码（token）
-export const UpdateTokenHandler: RequestHandler = async (req, res) => {
-  const { oldToken, newToken } = req.body;
+// 修改密码（账户密码登录）
+export const UpdatePasswordHandler: RequestHandler = async (req, res) => {
+  const { oldPassword, newPassword } = req.body;
   const authorization = req.headers.authorization;
 
-  if (isEmpty(newToken)) {
-    return sendError(res, 'newToken is empty');
+  if (isEmpty(newPassword)) {
+    return sendError(res, 'newPassword is empty');
   }
 
   // 强制要求旧密码
-  if (isEmpty(oldToken)) {
-    return sendError(res, 'oldToken is required');
+  if (isEmpty(oldPassword)) {
+    return sendError(res, 'oldPassword is required');
   }
 
   // 检查新旧密码是否相同
-  if (oldToken === newToken) {
+  if (oldPassword === newPassword) {
     return sendError(res, '新密码不能与旧密码相同');
   }
 
-  // 检查新密码强度
-  if (newToken.length < 6) {
-    return sendError(res, '新密码至少需要6个字符');
-  }
-
-  // 检查是否包含字母
-  if (!/[a-zA-Z]/.test(newToken)) {
-    return sendError(res, '新密码必须包含字母');
-  }
-
-  // 检查是否包含数字
-  if (!/[0-9]/.test(newToken)) {
-    return sendError(res, '新密码必须包含数字');
+  // 检查新密码复杂度（必须包含英文和数字，长度 6-12 位）
+  const validationError = validateWebUiPassword(newPassword);
+  if (validationError) {
+    return sendError(res, validationError);
   }
 
   try {
-    // 使用启动时缓存的token进行验证
-    const initialToken = getInitialWebUiToken();
-    if (!initialToken) {
-      return sendError(res, 'Server token not initialized');
+    // 使用启动时缓存的密码进行验证
+    const initialPassword = getInitialWebUiPassword();
+    if (!initialPassword) {
+      return sendError(res, 'Server password not initialized');
     }
-    // 校验必须全部通过、且新 token 更新成功之后才能吊销当前凭证，
-    // 否则旧 token 输错一次就会把当前会话踢下线
-    if (!AuthHelper.timingSafeEqualString(oldToken, initialToken)) {
-      return sendError(res, '旧 token 不匹配');
+    // 校验必须全部通过、且新密码更新成功之后才能吊销当前凭证，
+    // 否则旧密码输错一次就会把当前会话踢下线
+    if (!AuthHelper.timingSafeEqualString(oldPassword, initialPassword)) {
+      return sendError(res, '旧密码不匹配');
     }
-    // 直接更新配置文件中的token，不需要通过WebUiConfig.UpdateToken方法
-    await WebUiConfig.UpdateWebUIConfig({ token: newToken });
-    // 更新内存中的缓存token，使新密码立即生效
-    setInitialWebUiToken(newToken);
+    // 更新配置文件中的密码并清除强制改密标记
+    await WebUiConfig.UpdateWebUIConfig({
+      password: newPassword,
+      passwordChangeRequired: false,
+    });
+    // 更新内存中的缓存密码与标记，使新密码立即生效
+    setInitialWebUiPassword(newPassword);
+    setWebUiPasswordChangeRequired(false);
 
-    // 注销当前的Token（此时已确认更新成功）
+    // 注销当前的凭证（此时已确认更新成功）
     if (authorization) {
       const CredentialBase64: string = authorization.split(' ')[1] as string;
       const Credential = JSON.parse(Buffer.from(CredentialBase64, 'base64').toString());
       AuthHelper.revokeCredential(Credential);
     }
 
-    return sendSuccess(res, 'Token updated successfully');
+    // 重新签发与新密码绑定的凭证，用户无需重新登录
+    const signCredential = Buffer.from(
+      JSON.stringify(AuthHelper.signCredential(AuthHelper.generatePasswordHash(newPassword)))
+    ).toString('base64');
+    return sendSuccess(res, {
+      Credential: signCredential,
+    });
   } catch (e: any) {
-    return sendError(res, `Failed to update token: ${e.message}`);
+    return sendError(res, `Failed to update password: ${e.message}`);
   }
 };
 
@@ -268,14 +285,15 @@ export const VerifyPasskeyAuthenticationHandler: RequestHandler = async (req, re
     const verification = await PasskeyHelper.verifyAuthentication(userId, response, origin, rpId);
 
     if (verification.verified) {
-      // 使用与普通登录相同的凭证签发
-      const initialToken = getInitialWebUiToken();
-      if (!initialToken) {
-        return sendError(res, 'Server token not initialized');
+      // 使用与普通登录相同的凭证签发（与当前密码绑定的 hash）
+      const initialPassword = getInitialWebUiPassword();
+      if (!initialPassword) {
+        return sendError(res, 'Server password not initialized');
       }
-      const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(AuthHelper.generatePasswordHash(initialToken)))).toString('base64');
+      const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(AuthHelper.generatePasswordHash(initialPassword)))).toString('base64');
       return sendSuccess(res, {
         Credential: signCredential,
+        passwordChangeRequired: getWebUiPasswordChangeRequired(),
       });
     } else {
       return sendError(res, 'Authentication failed');

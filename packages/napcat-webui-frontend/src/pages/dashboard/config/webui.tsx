@@ -142,24 +142,29 @@ const WebUIConfigCard = () => {
     formState: { isSubmitting: isPwdSubmitting, errors: pwdErrors },
     watch,
   } = useForm<{
-    oldToken: string;
-    newToken: string;
+    oldPassword: string;
+    newPassword: string;
   }>({
     defaultValues: {
-      oldToken: '',
-      newToken: '',
+      oldPassword: '',
+      newPassword: '',
     },
   });
-  const oldTokenValue = watch('oldToken');
+  const oldPasswordValue = watch('oldPassword');
 
   // 修复类型错误：显式包装为无参函数，满足 onPress 的类型要求
   const onPasswordSubmit = handlePwdSubmit(async (data) => {
     try {
-      await WebUIManager.changePassword(data.oldToken, data.newToken);
+      const result = await WebUIManager.updatePassword(data.oldPassword, data.newPassword);
       toast.success('修改成功');
-      setToken('');
-      localStorage.removeItem(key.token);
-      navigate('/web_login');
+      if (result && result.Credential) {
+        // 服务端已重新签发与新密码绑定的凭证，保持登录状态
+        setToken(result.Credential);
+      } else {
+        setToken('');
+        localStorage.removeItem(key.token);
+        navigate('/web_login');
+      }
     } catch (error) {
       const msg = (error as Error).message;
       toast.error(`修改失败: ${msg}`);
@@ -212,7 +217,7 @@ const WebUIConfigCard = () => {
         <div className='flex-shrink-0 w-full font-bold text-default-600 dark:text-default-400 px-1'>修改密码</div>
         <Controller
           control={pwdControl}
-          name='oldToken'
+          name='oldPassword'
           rules={{
             required: '旧密码不能为空',
             validate: (value) => {
@@ -229,19 +234,19 @@ const WebUIConfigCard = () => {
               placeholder='请输入旧密码'
               type='password'
               isRequired
-              isInvalid={!!pwdErrors.oldToken}
-              errorMessage={pwdErrors.oldToken?.message}
+              isInvalid={!!pwdErrors.oldPassword}
+              errorMessage={pwdErrors.oldPassword?.message}
             />
           )}
         />
         <Controller
           control={pwdControl}
-          name='newToken'
+          name='newPassword'
           rules={{
             required: '新密码不能为空',
             minLength: {
               value: 6,
-              message: '新密码至少需要6个字符',
+              message: '新密码至少需要6位',
             },
             validate: (value) => {
               if (!value || value.trim().length === 0) {
@@ -250,11 +255,14 @@ const WebUIConfigCard = () => {
               if (value.trim().length !== value.length) {
                 return '新密码不能包含前后空格';
               }
-              if (value === oldTokenValue) {
+              if (value.length > 12) {
+                return '新密码最长不能超过12位';
+              }
+              if (value === oldPasswordValue) {
                 return '新密码不能与旧密码相同';
               }
               if (!/[a-zA-Z]/.test(value)) {
-                return '新密码必须包含字母';
+                return '新密码必须包含英文';
               }
               if (!/[0-9]/.test(value)) {
                 return '新密码必须包含数字';
@@ -266,11 +274,11 @@ const WebUIConfigCard = () => {
             <Input
               {...field}
               label='新密码'
-              placeholder='至少6位，包含字母和数字'
+              placeholder='6-12位，包含英文和数字'
               type='password'
               isRequired
-              isInvalid={!!pwdErrors.newToken}
-              errorMessage={pwdErrors.newToken?.message}
+              isInvalid={!!pwdErrors.newPassword}
+              errorMessage={pwdErrors.newPassword?.message}
             />
           )}
         />

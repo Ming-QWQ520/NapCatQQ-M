@@ -5,13 +5,14 @@
 import express from 'express';
 import type { WebUiConfigType } from './src/types';
 import { createServer } from 'http';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { createServer as createHttpsServer } from 'https';
 import { NapCatPathWrapper } from 'napcat-common/src/path';
 import { WebUiConfigWrapper } from '@/napcat-webui-backend/src/helper/config';
 import { ALLRouter } from '@/napcat-webui-backend/src/router';
 import { cors } from '@/napcat-webui-backend/src/middleware/cors';
-import { createUrl, getRandomToken } from '@/napcat-webui-backend/src/utils/url';
+import { createUrl } from '@/napcat-webui-backend/src/utils/url';
+import { generateWebUiPassword, validateWebUiPassword } from '@/napcat-webui-backend/src/utils/password';
 import { sendError } from '@/napcat-webui-backend/src/utils/response';
 import { join, dirname, resolve } from 'node:path';
 import { terminalManager } from '@/napcat-webui-backend/src/terminal/terminal_manager';
@@ -47,30 +48,37 @@ export let webUiLogger: ILogWrapper | null = null;
 const MAX_PORT_TRY = 100;
 
 export let webUiRuntimePort = 6099;
-// 全局变量：存储需要在QQ登录成功后发送的新token
-export let pendingTokenToSend: string | null = null;
 
 /**
- * 存储WebUI启动时的初始token，用于鉴权
- * - 无论是否在运行时修改密码，都应该使用此token进行鉴权
+ * 存储WebUI启动时的初始密码，用于鉴权
+ * - 无论是否在运行时修改密码，都应该使用此密码进行鉴权
  * - 运行时手动修改的密码将会在下次napcat重启后生效
  * - 如果需要在运行时修改密码并立即生效，则需要在前端调用路由进行修改
  */
-let initialWebUiToken: string = '';
+let initialWebUiPassword: string = '';
 
-export function setInitialWebUiToken (token: string) {
-  initialWebUiToken = token;
+/**
+ * 首次登录后是否强制要求修改密码（初始密码为自动生成时为 true）
+ */
+let webUiPasswordChangeRequired: boolean = false;
+
+export function setInitialWebUiPassword (password: string) {
+  initialWebUiPassword = password;
 }
 
-export function getInitialWebUiToken (): string {
-  return initialWebUiToken;
+export function getInitialWebUiPassword (): string {
+  return initialWebUiPassword;
 }
 
-export function setPendingTokenToSend (token: string | null) {
-  pendingTokenToSend = token;
+export function setWebUiPasswordChangeRequired (required: boolean) {
+  webUiPasswordChangeRequired = required;
 }
 
-export async function InitPort (parsedConfig: WebUiConfigType): Promise<[string, number, string]> {
+export function getWebUiPasswordChangeRequired (): boolean {
+  return webUiPasswordChangeRequired;
+}
+
+export async function InitPort (parsedConfig: WebUiConfigType): Promise<[string, number]> {
   try {
     await tryUseHost(parsedConfig.host);
     const preferredPort = parseInt(process.env['NAPCAT_WEBUI_PREFERRED_PORT'] || '', 10);
@@ -86,10 +94,10 @@ export async function InitPort (parsedConfig: WebUiConfigType): Promise<[string,
       port = await tryUsePort(parsedConfig.port, parsedConfig.host);
     }
 
-    return [parsedConfig.host, port, parsedConfig.token];
+    return [parsedConfig.host, port];
   } catch (error) {
     console.log('host或port不可用', error);
-    return ['', 0, randomUUID()];
+    return ['', 0];
   }
 }
 
@@ -124,29 +132,39 @@ export async function InitWebUi (logger: ILogWrapper, pathWrapper: NapCatPathWra
     return;
   }
 
-  // 优先使用环境变量覆盖 Token
-  if (process.env['NAPCAT_WEBUI_SECRET_KEY'] && config.token !== process.env['NAPCAT_WEBUI_SECRET_KEY']) {
-    await WebUiConfig.UpdateWebUIConfig({ token: process.env['NAPCAT_WEBUI_SECRET_KEY'] });
-    logger.log(`[NapCat] [WebUi] 检测到环境变量配置，已更新 WebUI Token 为 ${process.env['NAPCAT_WEBUI_SECRET_KEY']}`);
-    config = await WebUiConfig.GetWebUIConfig();
-  } else if (config.token === 'napcat' || !config.token) {
-    // 只有没设置环境变量，且是默认密码时，才生成随机密码
-    const randomToken = getRandomToken(8);
-    await WebUiConfig.UpdateWebUIConfig({ token: randomToken });
-    logger.log('[NapCat] [WebUi] 检测到默认密码，已自动更新为安全密码');
+  // 优先使用环境变量 NAPCAT_WEBUI_PASSWORD 指定 WebUI 密码（Docker 等无人值守场景）
+  const envPassword = process.env['NAPCAT_WEBUI_PASSWORD'];
+  if (envPassword) {
+    const envPasswordError = validateWebUiPassword(envPassword);
+    if (envPasswordError) {
+      logger.log(`[NapCat] [WebUi] 环境变量 NAPCAT_WEBUI_PASSWORD 不符合策略（${envPasswordError}），已忽略`);
+    } else if (config.password !== envPassword) {
+      await WebUiConfig.UpdateWebUIConfig({ password: envPassword });
+      logger.log('[NapCat] [WebUi] 已通过环境变量 NAPCAT_WEBUI_PASSWORD 设置 WebUI 密码');
+      config = await WebUiConfig.GetWebUIConfig();
+    }
+  }
 
-    // 存储token到全局变量，等待QQ登录成功后发送
-    setPendingTokenToSend(randomToken);
-    logger.log('[NapCat] [WebUi] 新密码将在QQ登录成功后发送给用户');
-
-    // 重新获取更新后的配置
+  // 密码为空（首次部署/旧版本升级）时生成随机初始密码并输出到控制台
+  if (!config.password) {
+    const initialPassword = generateWebUiPassword();
+    await WebUiConfig.UpdateWebUIConfig({
+      password: initialPassword,
+      // 初始密码为自动生成，首次登录成功后强制修改
+      passwordChangeRequired: true,
+    });
+    logger.log('[NapCat] [WebUi] WebUI 已启用账户密码登录');
+    logger.log(`[NapCat] [WebUi] 初始账户: ${config.username || 'napcat'}`);
+    logger.log(`[NapCat] [WebUi] 初始密码: ${initialPassword}`);
+    logger.log('[NapCat] [WebUi] 首次登录后请立即修改密码（需包含英文和数字，长度 6-12 位）');
     config = await WebUiConfig.GetWebUIConfig();
   }
 
-  // 存储启动时的初始token用于鉴权
-  setInitialWebUiToken(config.token);
+  // 存储启动时的初始密码与强制改密标记用于鉴权
+  setInitialWebUiPassword(config.password);
+  setWebUiPasswordChangeRequired(!!config.passwordChangeRequired);
 
-  const [host, port, token] = await InitPort(config);
+  const [host, port] = await InitPort(config);
   webUiRuntimePort = port;
   if (port === 0) {
     logger.log('[NapCat] [WebUi] Current WebUi is not run.');
@@ -507,8 +525,8 @@ export async function InitWebUi (logger: ILogWrapper, pathWrapper: NapCatPathWra
 
   // ------------启动服务------------
   server.listen(port, host, async () => {
-    const searchParams = { token };
-    logger.log(`[NapCat] [WebUi] WebUi Token: ${token}`);
+    // 账户密码登录模式下不再携带 token 查询参数
+    const searchParams: Record<string, string> = {};
     logger.log(
       `[NapCat] [WebUi] WebUi User Panel Url: ${createUrl('127.0.0.1', port.toString(), '/webui', searchParams)}`
     );

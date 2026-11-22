@@ -9,7 +9,7 @@ import { PassThrough } from 'stream';
 import multer from 'multer';
 import webUIFontUploader from '../uploader/webui_font';
 import diskUploader from '../uploader/disk';
-import { WebUiConfig, getInitialWebUiToken, webUiPathWrapper } from '@/napcat-webui-backend/index';
+import { WebUiConfig, getInitialWebUiPassword, webUiPathWrapper } from '@/napcat-webui-backend/index';
 
 const isWindows = os.platform() === 'win32';
 
@@ -372,12 +372,12 @@ export const WriteFileHandler: RequestHandler = async (req, res) => {
       try {
         // 解析要写入的配置
         const configToWrite = JSON.parse(content);
-        // 获取内存中的token，覆盖前端传来的token
-        const memoryToken = getInitialWebUiToken();
-        if (memoryToken) {
-          configToWrite.token = memoryToken;
-          finalContent = JSON.stringify(configToWrite, null, 4);
+        // 获取内存中的密码，覆盖前端传来的密码（防止文件编辑器写回过期凭据）
+        const memoryPassword = getInitialWebUiPassword();
+        if (memoryPassword) {
+          configToWrite.password = memoryPassword;
         }
+        finalContent = JSON.stringify(configToWrite, null, 4);
       } catch (_e) {
         // 如果解析失败 说明不符合json格式 不允许写入
         return sendError(res, '写入的WebUI配置文件内容格式错误，必须是合法的JSON');

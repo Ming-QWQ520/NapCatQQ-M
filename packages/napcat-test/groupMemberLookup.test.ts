@@ -7,10 +7,6 @@ import { NTQQGroupApi } from '../napcat-core/apis/group';
 import { NTQQUserApi } from '../napcat-core/apis/user';
 import { OneBotMsgApi } from '../napcat-onebot/api/msg';
 
-vi.mock('../napcat-webui-backend/index', () => ({
-  pendingTokenToSend: undefined,
-}));
-
 vi.mock('../napcat-webui-backend/src/helper/Data', () => ({
   WebUiDataRuntime: {},
 }));

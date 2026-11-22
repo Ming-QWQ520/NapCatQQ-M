@@ -10,6 +10,9 @@ import SaveButtons from '@/components/button/save_buttons';
 
 import WebUIManager from '@/controllers/webui_manager';
 
+// 密码长度上限（与服务端策略一致）
+const PASSWORD_MAX_LENGTH = 12;
+
 const ChangePasswordCard = () => {
   const {
     control,
@@ -18,12 +21,12 @@ const ChangePasswordCard = () => {
     reset,
     watch,
   } = useForm<{
-    oldToken: string;
-    newToken: string;
+    oldPassword: string;
+    newPassword: string;
   }>({
     defaultValues: {
-      oldToken: '',
-      newToken: '',
+      oldPassword: '',
+      newPassword: '',
     },
   });
 
@@ -31,17 +34,22 @@ const ChangePasswordCard = () => {
   const [, setToken] = useLocalStorage(key.token, '');
 
   // 监听旧密码的值
-  const oldTokenValue = watch('oldToken');
+  const oldPasswordValue = watch('oldPassword');
 
   const onSubmit = handleWebuiSubmit(async (data) => {
     try {
       // 使用正常密码更新流程
-      await WebUIManager.changePassword(data.oldToken, data.newToken);
+      const result = await WebUIManager.updatePassword(data.oldPassword, data.newPassword);
 
       toast.success('修改成功');
-      setToken('');
-      localStorage.removeItem(key.token);
-      navigate('/web_login');
+      if (result && result.Credential) {
+        // 服务端已重新签发与新密码绑定的凭证，保持登录状态
+        setToken(result.Credential);
+      } else {
+        setToken('');
+        localStorage.removeItem(key.token);
+        navigate('/web_login');
+      }
     } catch (error) {
       const msg = (error as Error).message;
       toast.error(`修改失败: ${msg}`);
@@ -54,7 +62,7 @@ const ChangePasswordCard = () => {
 
       <Controller
         control={control}
-        name='oldToken'
+        name='oldPassword'
         rules={{
           required: '旧密码不能为空',
           validate: (value) => {
@@ -71,20 +79,20 @@ const ChangePasswordCard = () => {
             placeholder='请输入旧密码'
             type='password'
             isRequired
-            isInvalid={!!errors.oldToken}
-            errorMessage={errors.oldToken?.message}
+            isInvalid={!!errors.oldPassword}
+            errorMessage={errors.oldPassword?.message}
           />
         )}
       />
 
       <Controller
         control={control}
-        name='newToken'
+        name='newPassword'
         rules={{
           required: '新密码不能为空',
           minLength: {
             value: 6,
-            message: '新密码至少需要6个字符',
+            message: '新密码至少需要6位',
           },
           validate: (value) => {
             if (!value || value.trim().length === 0) {
@@ -93,12 +101,15 @@ const ChangePasswordCard = () => {
             if (value.trim().length !== value.length) {
               return '新密码不能包含前后空格';
             }
-            if (value === oldTokenValue) {
+            if (value.length > PASSWORD_MAX_LENGTH) {
+              return `新密码最长不能超过${PASSWORD_MAX_LENGTH}位`;
+            }
+            if (value === oldPasswordValue) {
               return '新密码不能与旧密码相同';
             }
             // 检查是否包含字母
             if (!/[a-zA-Z]/.test(value)) {
-              return '新密码必须包含字母';
+              return '新密码必须包含英文';
             }
             // 检查是否包含数字
             if (!/[0-9]/.test(value)) {
@@ -111,11 +122,11 @@ const ChangePasswordCard = () => {
           <Input
             {...field}
             label='新密码'
-            placeholder='至少6位，包含字母和数字'
+            placeholder='6-12位，包含英文和数字'
             type='password'
             isRequired
-            isInvalid={!!errors.newToken}
-            errorMessage={errors.newToken?.message}
+            isInvalid={!!errors.newPassword}
+            errorMessage={errors.newPassword?.message}
           />
         )}
       />

@@ -1,10 +1,17 @@
 import { NextFunction, Request, Response } from 'express';
 
-import { getInitialWebUiToken } from '@/napcat-webui-backend/index';
+import { getInitialWebUiPassword, getWebUiPasswordChangeRequired } from '@/napcat-webui-backend/index';
 
 import { AuthHelper } from '@/napcat-webui-backend/src/helper/SignToken';
 import { sendError } from '@/napcat-webui-backend/src/utils/response';
 import type { WebUiCredentialJson } from '@/napcat-webui-backend/src/types';
+
+// 强制改密期间仍允许访问的接口（完成改密所需的最小集合）
+const CHANGE_REQUIRED_ALLOWED_PATHS = new Set([
+  '/auth/check',
+  '/auth/logout',
+  '/auth/update_password',
+]);
 
 // 鉴权中间件
 export async function auth (req: Request, res: Response, next: NextFunction) {
@@ -40,14 +47,18 @@ export async function auth (req: Request, res: Response, next: NextFunction) {
     } catch (_e) {
       return sendError(res, 'Unauthorized');
     }
-    // 使用启动时缓存的token进行验证，而不是动态读取配置文件 因为有可能运行时手动修改了密码
-    const initialToken = getInitialWebUiToken();
-    if (!initialToken) {
-      return sendError(res, 'Server token not initialized');
+    // 使用启动时缓存的密码进行验证，而不是动态读取配置文件 因为有可能运行时手动修改了密码
+    const initialPassword = getInitialWebUiPassword();
+    if (!initialPassword) {
+      return sendError(res, 'Server password not initialized');
     }
     // 验证凭证在1小时内有效
-    const credentialJson = AuthHelper.validateCredentialWithinOneHour(initialToken, Credential);
+    const credentialJson = AuthHelper.validateCredentialWithinOneHour(initialPassword, Credential);
     if (credentialJson) {
+      // 首次登录后未修改密码时，拦截除改密外的全部业务接口
+      if (getWebUiPasswordChangeRequired() && !CHANGE_REQUIRED_ALLOWED_PATHS.has(req.url)) {
+        return sendError(res, 'password_change_required');
+      }
       // 通过验证
       return next();
     }

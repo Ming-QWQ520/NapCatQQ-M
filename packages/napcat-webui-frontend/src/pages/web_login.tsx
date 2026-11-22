@@ -5,7 +5,7 @@ import { Input } from '@heroui/input';
 import { useLocalStorage } from '@uidotdev/usehooks';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { IoKeyOutline, IoArrowBack } from 'react-icons/io5';
+import { IoKeyOutline, IoLockClosedOutline, IoPersonOutline, IoArrowBack } from 'react-icons/io5';
 import { useNavigate } from 'react-router-dom';
 
 import logo from '@/assets/images/logo.png';
@@ -24,11 +24,35 @@ import { motion } from 'motion/react';
 // navigator.credentials.get 会一直不返回，不能让它无限期占住登录流程。
 const PASSKEY_TIMEOUT_MS = 30_000;
 
+// 默认账户名（与服务端 webui.json 的 username 默认值一致）
+const DEFAULT_USERNAME = 'napcat';
+
+const inputClassNames = {
+  label: 'text-black/50 dark:text-white/90',
+  input: [
+    'bg-transparent',
+    'text-black/90 dark:text-white/90',
+    'placeholder:text-default-700/50 dark:placeholder:text-white/60',
+  ],
+  innerWrapper: 'bg-transparent',
+  inputWrapper: [
+    'shadow-xl',
+    'bg-default-100/70',
+    'dark:bg-default/60',
+    'backdrop-blur-xl',
+    'backdrop-saturate-200',
+    'hover:bg-default-0/70',
+    'dark:hover:bg-default/70',
+    'group-data-[focus=true]:bg-default-100/50',
+    'dark:group-data-[focus=true]:bg-default/60',
+    '!cursor-text',
+  ],
+};
+
 export default function WebLoginPage () {
-  const urlSearchParams = new URLSearchParams(window.location.search);
-  const token = urlSearchParams.get('token');
   const navigate = useNavigate();
-  const [tokenValue, setTokenValue] = useState<string>(token || '');
+  const [usernameValue, setUsernameValue] = useState<string>(DEFAULT_USERNAME);
+  const [passwordValue, setPasswordValue] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isPasskeyLoading, setIsPasskeyLoading] = useState<boolean>(true); // 初始为true，表示正在检查passkey
   const passkeyAbortRef = useRef<AbortController | null>(null);
@@ -37,7 +61,7 @@ export default function WebLoginPage () {
   // 2FA相关状态
   const [require2FA, setRequire2FA] = useState<boolean>(false);
   const [totpCode, setTotpCode] = useState<string>('');
-  const [pendingToken, setPendingToken] = useState<string>('');
+  const [pendingPassword, setPendingPassword] = useState<string>('');
 
   // Helper function to decode base64url
   function base64UrlToUint8Array (base64Url: string): Uint8Array {
@@ -55,6 +79,18 @@ export default function WebLoginPage () {
     const base64 = btoa(String.fromCharCode(...uint8Array));
     return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
   }
+
+  // 登录成功后的统一跳转：首次登录（初始密码未修改）先进强制改密页
+  const afterLoginSuccess = (data: { Credential?: string; passwordChangeRequired?: boolean; }) => {
+    if (data.Credential) {
+      setLocalToken(data.Credential);
+    }
+    if (data.passwordChangeRequired) {
+      navigate('/web_change_password', { replace: true });
+    } else {
+      navigate('/qq_login', { replace: true });
+    }
+  };
 
   // 自动检查并尝试passkey登录
   const tryPasskeyLogin = async () => {
@@ -105,17 +141,16 @@ export default function WebLoginPage () {
       // 验证认证
       const data = await WebUIManager.verifyPasskeyAuthentication(response);
 
-      // 用户已改用 Token 登录，不再用 Passkey 的结果覆盖
+      // 用户已改用账户密码登录，不再用 Passkey 的结果覆盖
       if (controller.signal.aborted) {
         return false;
       }
       if (data && data.Credential) {
-        setLocalToken(data.Credential);
-        navigate('/qq_login', { replace: true });
+        afterLoginSuccess(data);
         return true; // 登录成功
       }
     } catch (error) {
-      // passkey登录失败，继续显示token登录界面
+      // passkey登录失败，继续显示账户密码登录界面
       console.log('Passkey login failed or not available:', error);
     } finally {
       clearTimeout(timer);
@@ -126,32 +161,33 @@ export default function WebLoginPage () {
     return false; // 登录失败
   };
 
-  // 第一次登录（输入token）
-  const onSubmitToken = async () => {
-    if (!tokenValue) {
-      toast.error('请输入token');
+  // 第一次登录（输入账户密码）
+  const onSubmitLogin = async () => {
+    if (!usernameValue) {
+      toast.error('请输入账户');
       return;
     }
-    // 改用 Token 登录时放弃仍在等待的 Passkey 验证
+    if (!passwordValue) {
+      toast.error('请输入密码');
+      return;
+    }
+    // 改用账户密码登录时放弃仍在等待的 Passkey 验证
     passkeyAbortRef.current?.abort();
     setIsLoading(true);
     try {
-      const data = await WebUIManager.loginWithToken(tokenValue);
+      const data = await WebUIManager.loginWithPassword(usernameValue, passwordValue);
 
       if (data) {
         if (data.require2FA) {
           // 需要2FA验证
           setRequire2FA(true);
-          setPendingToken(tokenValue);
+          setPendingPassword(passwordValue);
           setIsLoading(false);
           return;
         }
 
         // 不需要2FA，直接登录
-        if (data.Credential) {
-          setLocalToken(data.Credential);
-        }
-        navigate('/qq_login', { replace: true });
+        afterLoginSuccess(data);
       }
     } catch (error) {
       toast.error((error as Error).message);
@@ -168,11 +204,10 @@ export default function WebLoginPage () {
     }
     setIsLoading(true);
     try {
-      const data = await WebUIManager.loginWithToken(pendingToken, totpCode);
+      const data = await WebUIManager.loginWithPassword(usernameValue, pendingPassword, totpCode);
 
       if (data && data.Credential) {
-        setLocalToken(data.Credential);
-        navigate('/qq_login', { replace: true });
+        afterLoginSuccess(data);
       }
     } catch (error) {
       toast.error((error as Error).message);
@@ -181,11 +216,11 @@ export default function WebLoginPage () {
     }
   };
 
-  // 返回token输入步骤
-  const goBackToToken = () => {
+  // 返回账户密码输入步骤
+  const goBackToLogin = () => {
     setRequire2FA(false);
     setTotpCode('');
-    setPendingToken('');
+    setPendingPassword('');
   };
 
   // 处理全局键盘事件
@@ -194,7 +229,7 @@ export default function WebLoginPage () {
       if (require2FA) {
         onSubmit2FA();
       } else {
-        onSubmitToken();
+        onSubmitLogin();
       }
     }
   };
@@ -206,18 +241,10 @@ export default function WebLoginPage () {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [tokenValue, totpCode, isLoading, require2FA]); // 依赖项包含用于登录的状态
+  }, [usernameValue, passwordValue, totpCode, isLoading, require2FA]); // 依赖项包含用于登录的状态
 
   useEffect(() => {
-    // 如果URL中有token，直接登录
-    if (token) {
-      // 不需要检查passkey，立即清除loading状态，避免登录失败后输入框被永久禁用
-      setIsPasskeyLoading(false);
-      onSubmitToken();
-      return;
-    }
-
-    // 否则尝试passkey自动登录
+    // 尝试passkey自动登录
     tryPasskeyLogin().finally(() => {
       setIsPasskeyLoading(false);
     });
@@ -257,7 +284,7 @@ export default function WebLoginPage () {
             <CardBody className='flex gap-5 py-5 px-5 md:px-10'>
               {isPasskeyLoading && (
                 <div className='text-center text-small text-default-600 dark:text-default-400 px-2'>
-                  🔐 正在检查Passkey，也可以直接输入Token登录
+                  🔐 正在检查Passkey，也可以直接输入账户密码登录
                 </div>
               )}
 
@@ -269,7 +296,7 @@ export default function WebLoginPage () {
                       isIconOnly
                       variant='light'
                       className='self-start -ml-2'
-                      onPress={goBackToToken}
+                      onPress={goBackToLogin}
                     >
                       <IoArrowBack size={20} />
                     </Button>
@@ -287,27 +314,7 @@ export default function WebLoginPage () {
                         inputMode='numeric'
                         pattern='[0-9]*'
                         maxLength={6}
-                        classNames={{
-                          label: 'text-black/50 dark:text-white/90',
-                          input: [
-                            'bg-transparent',
-                            'text-black/90 dark:text-white/90',
-                            'placeholder:text-default-700/50 dark:placeholder:text-white/60',
-                          ],
-                          innerWrapper: 'bg-transparent',
-                          inputWrapper: [
-                            'shadow-xl',
-                            'bg-default-100/70',
-                            'dark:bg-default/60',
-                            'backdrop-blur-xl',
-                            'backdrop-saturate-200',
-                            'hover:bg-default-0/70',
-                            'dark:hover:bg-default/70',
-                            'group-data-[focus=true]:bg-default-100/50',
-                            'dark:group-data-[focus=true]:bg-default/60',
-                            '!cursor-text',
-                          ],
-                        }}
+                        classNames={inputClassNames}
                         isDisabled={isLoading}
                         label='验证码'
                         placeholder='请输入6位验证码'
@@ -338,61 +345,49 @@ export default function WebLoginPage () {
                     <form
                       onSubmit={(e) => {
                         e.preventDefault();
-                        onSubmitToken();
+                        onSubmitLogin();
                       }}
                     >
-                      {/* 隐藏的用户名字段，帮助浏览器识别登录表单 */}
-                      <input
+                      <Input
+                        isClearable
                         type='text'
                         name='username'
-                        value='napcat-webui'
                         autoComplete='username'
-                        className='absolute -left-[9999px] opacity-0 pointer-events-none'
-                        readOnly
-                        tabIndex={-1}
-                        aria-label='Username'
+                        classNames={inputClassNames}
+                        isDisabled={isLoading}
+                        label='账户'
+                        placeholder={DEFAULT_USERNAME}
+                        radius='lg'
+                        size='lg'
+                        startContent={
+                          <IoPersonOutline className='text-black/50 mb-0.5 dark:text-white/90 text-slate-400 pointer-events-none flex-shrink-0' />
+                      }
+                        value={usernameValue}
+                        onChange={(e) => setUsernameValue(e.target.value)}
+                        onClear={() => setUsernameValue('')}
                       />
+                      <div className='h-4' />
                       <Input
                         isClearable
                         type='password'
                         name='password'
                         autoComplete='current-password'
-                        classNames={{
-                          label: 'text-black/50 dark:text-white/90',
-                          input: [
-                            'bg-transparent',
-                            'text-black/90 dark:text-white/90',
-                            'placeholder:text-default-700/50 dark:placeholder:text-white/60',
-                          ],
-                          innerWrapper: 'bg-transparent',
-                          inputWrapper: [
-                            'shadow-xl',
-                            'bg-default-100/70',
-                            'dark:bg-default/60',
-                            'backdrop-blur-xl',
-                            'backdrop-saturate-200',
-                            'hover:bg-default-0/70',
-                            'dark:hover:bg-default/70',
-                            'group-data-[focus=true]:bg-default-100/50',
-                            'dark:group-data-[focus=true]:bg-default/60',
-                            '!cursor-text',
-                          ],
-                        }}
+                        classNames={inputClassNames}
                         isDisabled={isLoading}
-                        label='Token'
-                        placeholder='请输入token'
+                        label='密码'
+                        placeholder='请输入密码'
                         radius='lg'
                         size='lg'
                         startContent={
-                          <IoKeyOutline className='text-black/50 mb-0.5 dark:text-white/90 text-slate-400 pointer-events-none flex-shrink-0' />
+                          <IoLockClosedOutline className='text-black/50 mb-0.5 dark:text-white/90 text-slate-400 pointer-events-none flex-shrink-0' />
                       }
-                        value={tokenValue}
-                        onChange={(e) => setTokenValue(e.target.value)}
-                        onClear={() => setTokenValue('')}
+                        value={passwordValue}
+                        onChange={(e) => setPasswordValue(e.target.value)}
+                        onClear={() => setPasswordValue('')}
                       />
                     </form>
                     <div className='text-center text-small text-default-600 dark:text-default-400 px-2'>
-                      💡 提示：请从 NapCat 启动日志中查看登录密钥
+                      💡 初始账户 napcat，初始密码请查看 NapCat 启动日志；首次登录后需修改密码
                     </div>
                     <Button
                       className='mx-10 mt-10 text-lg py-7'
@@ -401,7 +396,7 @@ export default function WebLoginPage () {
                       radius='full'
                       size='lg'
                       variant='shadow'
-                      onPress={onSubmitToken}
+                      onPress={onSubmitLogin}
                     >
                       {!isLoading && (
                         <Image

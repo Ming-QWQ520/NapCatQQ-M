@@ -4,7 +4,7 @@ import {
   checkHandler,
   LoginHandler,
   LogoutHandler,
-  UpdateTokenHandler,
+  UpdatePasswordHandler,
   GeneratePasskeyRegistrationOptionsHandler,
   VerifyPasskeyRegistrationHandler,
   GeneratePasskeyAuthenticationOptionsHandler,
@@ -22,8 +22,8 @@ router.post('/login', LoginHandler);
 router.post('/check', checkHandler);
 // router:注销
 router.post('/logout', LogoutHandler);
-// router:更新token
-router.post('/update_token', UpdateTokenHandler);
+// router:修改密码（账户密码登录）
+router.post('/update_password', UpdatePasswordHandler);
 // router:生成Passkey注册选项
 router.post('/passkey/generate-registration-options', GeneratePasskeyRegistrationOptionsHandler);
 // router:验证Passkey注册
