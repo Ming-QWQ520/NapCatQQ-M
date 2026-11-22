@@ -1,10 +1,10 @@
 name: Release Tag
 
 on:
+  # 仅手动触发。tag 推送已由 release-publish.yml 直接监听（push.tags），
+  # 本工作流的 API dispatch 依赖 NAPCAT_BUILD secret（fork 中不可用，
+  # 会在 401 上失败），不再响应 tag 推送。
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 permissions: write-all
 

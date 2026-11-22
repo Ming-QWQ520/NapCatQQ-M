@@ -7,6 +7,12 @@ on:
         description: 'Release version tag (e.g., v4.10.7)'
         required: true
         type: string
+  # tag 直接触发发布：不再依赖 release-tag.yml 的 API dispatch
+  # （后者需要 NAPCAT_BUILD secret，fork 环境不可用）。手动 dispatch
+  # 时用 inputs.version，tag 推送时用 ref 名，两者互为兼容。
+  push:
+    tags:
+      - 'v*'
 
 permissions: write-all
 
@@ -32,7 +38,7 @@ jobs:
       - name: Clone Main Repository
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.version }}
+          ref: ${{ inputs.version || github.ref_name }}
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -45,7 +51,7 @@ jobs:
       - name: Build NapCat.${{ matrix.target.name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NAPCAT_VERSION: ${{ inputs.version }}
+          NAPCAT_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           pnpm i
           pnpm --filter napcat-webui-frontend run build || exit 1
@@ -74,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.version }}
+          ref: ${{ inputs.version || github.ref_name }}
 
       - name: Download Artifacts
         uses: actions/download-artifact@v7
@@ -195,7 +201,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.version }}
+          ref: ${{ inputs.version || github.ref_name }}
       - uses: actions/download-artifact@v7
         with:
           name: NapCat.Shell.Windows.Node
@@ -253,14 +259,14 @@ jobs:
 
       - name: Generate release note
         env:
-          CURRENT_TAG: ${{ inputs.version }}
+          CURRENT_TAG: ${{ inputs.version || github.ref_name }}
         run: node .github/scripts/generate-release-notes.mjs "$CURRENT_TAG" "$GITHUB_REPOSITORY" CHANGELOG.md
 
       - name: Create Release and Upload Artifacts
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.version }}
-          name: NapCat ${{ inputs.version }}
+          tag_name: ${{ inputs.version || github.ref_name }}
+          name: NapCat ${{ inputs.version || github.ref_name }}
           body_path: CHANGELOG.md
           files: |
             NapCat.Shell.Windows.Node.zip
@@ -308,7 +314,7 @@ jobs:
           GH_TOKEN: ${{ secrets.NAPCAT_BUILD }}
         run: |
           set -euo pipefail
-          VERSION="${{ inputs.version }}"
+          VERSION="${{ inputs.version || github.ref_name }}"
           HASH_REPO="NapNeko/napcat-release-hash"
 
           gh auth setup-git
@@ -335,7 +341,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           echo "Triggering release-downstream workflow with tag_name=${VERSION}"
           curl -X POST \
