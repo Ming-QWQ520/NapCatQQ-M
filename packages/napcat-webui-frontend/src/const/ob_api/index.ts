@@ -1,5 +1,7 @@
 import { TSchema } from '@sinclair/typebox';
 
+import key from '@/const/key';
+
 export interface OneBotHttpApiContent {
   description?: string;
   payload: TSchema;
@@ -16,7 +18,7 @@ export async function fetchOneBotHttpApi (): Promise<OneBotHttpApi> {
   try {
     const response = await fetch('/api/Debug/schemas', {
       headers: {
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
+        Authorization: `Bearer ${localStorage.getItem(key.token)}`,
       },
     });
     const data = await response.json();

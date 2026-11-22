@@ -43,7 +43,7 @@ const OneBotApiDebug = forwardRef<OneBotApiDebugRef, OneBotApiDebugProps>((props
   const currentURL = new URL(window.location.origin);
   currentURL.port = '3000';
   const defaultHttpUrl = currentURL.href;
-  const defaultToken = localStorage.getItem('token') || '';
+  const defaultToken = localStorage.getItem(key.token) || '';
   const [httpConfig, setHttpConfig] = useLocalStorage(key.httpDebugConfig, {
     url: defaultHttpUrl,
     token: defaultToken,
@@ -102,7 +102,7 @@ const OneBotApiDebug = forwardRef<OneBotApiDebugRef, OneBotApiDebugProps>((props
           params: parsedRequestBody,
         }, {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
+            Authorization: `Bearer ${localStorage.getItem(key.token)}`,
           },
         }).then((res) => {
           if (res.data.code === 0) {

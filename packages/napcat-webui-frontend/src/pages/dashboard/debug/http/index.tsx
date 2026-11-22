@@ -53,7 +53,7 @@ export default function HttpDebug () {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${localStorage.getItem('token')}`,
+              Authorization: `Bearer ${localStorage.getItem(key.token)}`,
             },
           }).then(res => res.json()).then(data => {
             if (data.code === 0) {

@@ -1,3 +1,4 @@
+import key from '@/const/key';
 import { serverRequest } from '@/utils/request';
 
 type TerminalCallback = (data: string) => void;
@@ -56,7 +57,7 @@ class TerminalManager {
       url.protocol = url.protocol.replace('http', 'ws');
       url.pathname = '/api/ws/terminal';
       url.searchParams.set('id', id);
-      const token = JSON.parse(localStorage.getItem('token') || '');
+      const token = JSON.parse(localStorage.getItem(key.token) || '');
       if (!token) {
         throw new Error('No token found');
       }

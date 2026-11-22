@@ -2,6 +2,7 @@ import CryptoJS from 'crypto-js';
 import { EventSourcePolyfill } from 'event-source-polyfill';
 
 import { LogLevel } from '@/const/enum';
+import key from '@/const/key';
 
 import { serverRequest } from '@/utils/request';
 
@@ -199,7 +200,7 @@ export default class WebUIManager {
   }
 
   public static getRealTimeLogs (writer: (data: Log[]) => void) {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem(key.token);
     if (!token) {
       throw new Error('未登录');
     }
@@ -231,7 +232,7 @@ export default class WebUIManager {
   }
 
   public static getSystemStatus (writer: (data: SystemStatus) => void) {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem(key.token);
     if (!token) {
       throw new Error('未登录');
     }

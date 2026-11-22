@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
+import { LuBot } from 'react-icons/lu';
 import { MdMenu, MdMenuOpen } from 'react-icons/md';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -24,6 +25,23 @@ import ProcessManager from '@/controllers/process_manager';
 import { waitForBackendReady } from '@/utils/process_utils';
 
 const menus: MenuItem[] = siteConfig.navItems;
+
+// NapCat-M Stack 统一网关把本 WebUI 挂在 /napcat 前缀下（与 AstrBot
+// 仪表盘同端口、同源）。此时在侧边栏顶部提供「AstrBot 控制台」整页
+// 跳转入口；独立部署时 pathname 不带该前缀，入口不显示。
+// 面包屑仍使用 menus（不含本入口，避免与首页路由 '/' 撞名）。
+const isStackMounted = window.location.pathname.startsWith('/napcat');
+const sidebarMenus: MenuItem[] = isStackMounted
+  ? [
+      {
+        label: 'AstrBot 控制台',
+        icon: <LuBot className='w-5 h-5' />,
+        href: '/',
+        external: true,
+      },
+      ...siteConfig.navItems,
+    ]
+  : siteConfig.navItems;
 
 const findTitle = (menus: MenuItem[], pathname: string): string[] => {
   const paths: string[] = [];
@@ -156,7 +174,7 @@ const Layout: React.FC<{ children: React.ReactNode; }> = ({ children }) => {
     >
       <PageLoading loading={isRestarting} />
       <SideBar
-        items={menus}
+        items={sidebarMenus}
         open={openSideBar}
         onClose={() => setOpenSideBar(false)}
       />

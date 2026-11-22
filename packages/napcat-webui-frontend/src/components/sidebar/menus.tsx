@@ -24,12 +24,13 @@ const renderItems = (items: MenuItem[], children = false) => {
       {}
     );
     const isActive = React.useMemo(() => {
+      if (item.external) return false;
       if (item.href) {
         return !!matchPath(item.href, locate.pathname);
       }
 
       return false;
-    }, [item.href, locate.pathname]);
+    }, [item.external, item.href, locate.pathname]);
 
     const goTo = (href: string) => {
       navigate(href);
@@ -123,7 +124,11 @@ const renderItems = (items: MenuItem[], children = false) => {
           variant={isActive ? (children ? 'solid' : 'shadow') : 'light'}
           onPress={() => {
             if (item.href) {
-              if (!isActive) {
+              if (item.external) {
+                // 站外目标（如统一网关下的 AstrBot 控制台）：整页跳转。
+                // SPA 路由的 basename 局限在本 WebUI 的挂载前缀内，必须绕开。
+                window.location.assign(item.href);
+              } else if (!isActive) {
                 goTo(item.href);
               }
             } else if (canOpen) {

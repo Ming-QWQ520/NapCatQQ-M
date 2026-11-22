@@ -51,7 +51,7 @@ export default function WSDebug () {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
+            Authorization: `Bearer ${localStorage.getItem(key.token)}`,
           },
         });
         const data = await response.json();

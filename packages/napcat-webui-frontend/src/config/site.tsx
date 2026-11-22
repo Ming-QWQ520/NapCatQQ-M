@@ -21,6 +21,9 @@ export interface MenuItem {
   href?: string;
   items?: MenuItem[];
   customIcon?: string;
+  /** 站外目标：点击时整页跳转 href，不走 SPA 路由（用于统一网关下
+ *  跳转到其它 WebUI，如 AstrBot 控制台） */
+  external?: boolean;
 }
 
 export const siteConfig = {
