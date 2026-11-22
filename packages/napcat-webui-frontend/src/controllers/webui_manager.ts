@@ -18,11 +18,21 @@ export default class WebUIManager {
     return data.data;
   }
 
+  // 查询登录模式：sharedPassword 为 true 时密码与 AstrBot 仪表盘一致
+  public static async getLoginMode () {
+    const { data } = await serverRequest.get<ServerResponse<LoginModeResponse>>(
+      '/auth/login_mode'
+    );
+    return data.data;
+  }
+
   public static async loginWithPassword (username: string, password: string, totpCode?: string) {
     const sha256 = CryptoJS.SHA256(password + '.napcat').toString();
     const { data } = await serverRequest.post<ServerResponse<AuthResponse>>(
       '/auth/login',
-      { username, hash: sha256, totpCode }
+      // hash 供独立模式校验；password（明文）供共用密码模式校验
+      // （密码以 AstrBot 仪表盘为准，需明文参与 PBKDF2/MD5 比对）
+      { username, hash: sha256, password, totpCode }
     );
     return data.data;
   }

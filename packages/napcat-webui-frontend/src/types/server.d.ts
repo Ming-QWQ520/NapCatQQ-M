@@ -11,6 +11,11 @@ interface AuthResponse {
   message?: string;
 }
 
+// 登录模式：sharedPassword 为 true 时密码与 AstrBot 仪表盘一致（以 AstrBot 为准）
+interface LoginModeResponse {
+  sharedPassword: boolean;
+}
+
 interface UpdatePasswordResponse {
   Credential?: string;
 }

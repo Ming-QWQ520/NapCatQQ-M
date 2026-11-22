@@ -58,6 +58,9 @@ export default function WebLoginPage () {
   const passkeyAbortRef = useRef<AbortController | null>(null);
   const [, setLocalToken] = useLocalStorage<string>(key.token, '');
 
+  // 共用密码模式：密码与 AstrBot 仪表盘一致（以 AstrBot 为准）
+  const [sharedPassword, setSharedPassword] = useState<boolean>(false);
+
   // 2FA相关状态
   const [require2FA, setRequire2FA] = useState<boolean>(false);
   const [totpCode, setTotpCode] = useState<string>('');
@@ -244,6 +247,10 @@ export default function WebLoginPage () {
   }, [usernameValue, passwordValue, totpCode, isLoading, require2FA]); // 依赖项包含用于登录的状态
 
   useEffect(() => {
+    // 查询登录模式（共用密码 / 独立密码），切换登录提示文案
+    WebUIManager.getLoginMode()
+      .then((mode) => setSharedPassword(!!mode?.sharedPassword))
+      .catch(() => { /* 查询失败按独立模式展示，不影响登录 */ });
     // 尝试passkey自动登录
     tryPasskeyLogin().finally(() => {
       setIsPasskeyLoading(false);
@@ -387,7 +394,9 @@ export default function WebLoginPage () {
                       />
                     </form>
                     <div className='text-center text-small text-default-600 dark:text-default-400 px-2'>
-                      💡 初始账户 napcat，初始密码请查看 NapCat 启动日志；首次登录后需修改密码
+                      {sharedPassword
+                        ? '💡 登录账户 napcat，登录密码与 AstrBot 仪表盘一致（以 AstrBot 为准）'
+                        : '💡 初始账户 napcat，初始密码请查看 NapCat 启动日志；首次登录后需修改密码'}
                     </div>
                     <Button
                       className='mx-10 mt-10 text-lg py-7'

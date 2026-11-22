@@ -63,6 +63,24 @@ pnpm build:plugin-builtin
 
 `packages/napcat-vite/vite-plugin-version.js` 原本从 `NapNeko/NapCatQQ` 的 tags 取版本，上游删库后回退成 `1.0.0-dev`。现在默认读本仓库 tags，兜底 `4.18.4`；需要换维护仓库时用 `NAPCAT_REPO_OWNER` / `NAPCAT_REPO_NAME` 覆盖。
 
+## 相对上游的 WebUI 登录改造
+
+两轮改造，均向后兼容（不设置环境变量时保持独立账户密码登录）：
+
+1. **账户密码登录**（v4.18.43）：由上游单 token 改为「账户 + 密码」，默认账户
+   `napcat`；独立部署时初始密码自动生成并打印到控制台，首次登录强制改密
+   （密码需含英文和数字，长度 6-12 位）。
+2. **共用密码模式**（v4.18.44，配合 NapCat-M Stack）：设置环境变量
+   `NAPCAT_ASTRBOT_CONFIG` 指向 AstrBot 的 `data/cmd_config.json` 后，
+   登录密码与 AstrBot 仪表盘**完全一致、以 AstrBot 为准**：
+   - 后端按文件 mtime 实时重读，AstrBot 控制台改密后无需重启即生效；
+   - 哈希校验对齐 `astrbot/core/utils/auth_password.py`（PBKDF2-SHA256
+     600k 轮优先，MD5 旧存储回退）；
+   - 本端不再生成/存储密码，`/auth/update_password` 拒绝执行并引导前往
+     AstrBot 改密；登录页经 `/auth/login_mode`（免鉴权）自适应文案；
+   - 登录凭证仍为 1 小时有效的 HMAC 签名，共用模式下不做密码绑定
+     （服务端不落盘明文，无法比对）。
+
 ## 相关
 
 - `vb2250158/NapCatQQ-empty`：同一 fork 网络里的空壳占位（上游清空后 fork 所得，只有 README），保留作对照，不代表可用代码。
