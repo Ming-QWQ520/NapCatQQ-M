@@ -300,7 +300,10 @@ jobs:
           --header 'Content-Type: application/json' \
           --data-binary @apifox_payload.json
 
+      # 以下两步是上游 NapNeko 生态的遗留：hash 仓库与下游仓库均不属于本
+      # fork，无权限写入（上游已停维）。保留代码但不阻塞发布结果。
       - name: Publish release hash
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.NAPCAT_BUILD }}
         run: |
@@ -329,6 +332,7 @@ jobs:
           fi
 
       - name: Trigger downstream release workflows
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
