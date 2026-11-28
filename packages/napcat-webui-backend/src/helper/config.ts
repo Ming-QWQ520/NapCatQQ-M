@@ -126,6 +126,21 @@ export class WebUiConfigWrapper {
     return task;
   }
 
+  /**
+   * 共用密码模式：清空缓存并重读磁盘上的 webui.json（密码以文件为准）。
+   *
+   * 一体化栈会在运行期把 AstrBot 控制台的密码同步写入该文件，
+   * 重读后无需重启即可用新密码登录。注意此处不应用内存初始密码覆盖，
+   * 文件内容即真值。
+   */
+  async ReloadWebUIConfig (): Promise<WebUiConfigType> {
+    const configPath = resolve(webUiPathWrapper.configPath, './webui.json');
+    await this.ensureConfigFileExists(configPath);
+    const parsedConfig = await this.readAndValidateConfig(configPath);
+    this.WebUiConfigData = parsedConfig;
+    return parsedConfig;
+  }
+
   private async doUpdateWebUIConfig (newConfig: Partial<WebUiConfigType>): Promise<void> {
     const configPath = resolve(webUiPathWrapper.configPath, './webui.json');
     // 使用原始配置进行合并，避免内存token覆盖影响配置更新

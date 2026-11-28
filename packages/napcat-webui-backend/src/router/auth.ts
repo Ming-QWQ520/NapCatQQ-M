@@ -2,7 +2,6 @@ import { Router } from 'express';
 
 import {
   checkHandler,
-  GetLoginModeHandler,
   LoginHandler,
   LogoutHandler,
   UpdatePasswordHandler,
@@ -17,8 +16,6 @@ import {
 } from '@/napcat-webui-backend/src/api/Auth';
 
 const router: Router = Router();
-// router:登录模式查询（无需鉴权，登录页据此切换文案与提交格式）
-router.get('/login_mode', GetLoginModeHandler);
 // router:登录
 router.post('/login', LoginHandler);
 // router:检查登录状态

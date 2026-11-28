@@ -7,79 +7,57 @@ import { sendSuccess, sendError } from '@/napcat-webui-backend/src/utils/respons
 import { isEmpty } from '@/napcat-webui-backend/src/utils/check';
 import { validateWebUiPassword } from '@/napcat-webui-backend/src/utils/password';
 import {
-  isAstrBotConfigReadable,
-  verifyAstrBotPassword,
-} from '@/napcat-webui-backend/src/helper/AstrBotAuth';
-import {
   WebUiConfig,
   getInitialWebUiPassword,
   setInitialWebUiPassword,
   getWebUiPasswordChangeRequired,
   setWebUiPasswordChangeRequired,
-  getWebUiSharedPasswordMode,
+  isSharedPasswordMode,
 } from '@/napcat-webui-backend/index';
-
-// 登录模式查询（无需鉴权）：登录页据此切换文案与提交格式
-export const GetLoginModeHandler: RequestHandler = async (_req, res) => {
-  return sendSuccess(res, {
-    sharedPassword: getWebUiSharedPasswordMode(),
-  });
-};
 
 // 登录 - 账户密码 + 可选2FA验证
 export const LoginHandler: RequestHandler = async (req, res) => {
   // 获取WebUI配置
-  const WebUiConfigData = await WebUiConfig.GetWebUIConfig();
-  // 获取请求体中的账户、密码与totpCode（hash 供独立模式，password 供共用密码模式）
-  const { username, hash, password, totpCode } = req.body;
+  let WebUiConfigData = await WebUiConfig.GetWebUIConfig();
+  // 获取请求体中的账户、密码hash和totpCode
+  const { username, hash, totpCode } = req.body;
   // 获取客户端IP
   const clientIP = req.ip || req.socket.remoteAddress || '';
 
-  // 如果账户或密码为空，返回错误信息
+  // 如果账户或密码hash为空，返回错误信息
   if (isEmpty(username)) {
     return sendError(res, 'username is empty');
   }
-  const sharedMode = getWebUiSharedPasswordMode();
-  if (sharedMode && isEmpty(password)) {
-    return sendError(res, '请刷新登录页（Ctrl+F5）后重试：新版本登录需提交密码');
-  }
-  if (!sharedMode && isEmpty(hash)) {
+  if (isEmpty(hash)) {
     return sendError(res, 'password is empty');
   }
   // 检查登录频率
   if (!WebUiDataRuntime.checkLoginRate(clientIP, WebUiConfigData.loginRate)) {
     return sendError(res, 'login rate limit');
   }
+  // 共用密码模式：每次登录前重读磁盘配置，AstrBot 侧改密无需重启即可生效
+  if (isSharedPasswordMode()) {
+    const freshConfig = await WebUiConfig.ReloadWebUIConfig();
+    if (freshConfig.password) {
+      setInitialWebUiPassword(freshConfig.password);
+    }
+    WebUiConfigData = freshConfig;
+  }
+  // 使用启动时缓存的密码进行验证，而不是动态读取配置文件
+  const initialPassword = getInitialWebUiPassword();
+  if (!initialPassword) {
+    return sendError(res, isSharedPasswordMode()
+      ? '密码尚未同步：请先登录一次 AstrBot 控制台（统一网关首页 /），再用同一密码登录本页'
+      : 'Server password not initialized');
+  }
   // 验证账户
   if (!AuthHelper.timingSafeEqualString(username, WebUiConfigData.username || 'napcat')) {
     return sendError(res, 'username or password is invalid');
   }
-  // 验证密码
-  if (sharedMode) {
-    // 共用密码模式：密码以 AstrBot 仪表盘为准（PBKDF2/MD5 校验，
-    // AstrBot 控制台改密后无需重启即对新登录生效）
-    const ok = await verifyAstrBotPassword(String(password));
-    if (!ok) {
-      if (!isAstrBotConfigReadable()) {
-        return sendError(res, 'AstrBot 密码文件尚未就绪（AstrBot 可能仍在启动），请稍后重试');
-      }
-      return sendError(res, 'username or password is invalid');
-    }
-  } else {
-    // 独立模式：使用启动时缓存的密码进行验证，而不是动态读取配置文件
-    const initialPassword = getInitialWebUiPassword();
-    if (!initialPassword) {
-      return sendError(res, 'Server password not initialized');
-    }
-    // 验证密码hash是否等于提交的密码hash
-    if (!AuthHelper.comparePasswordHash(initialPassword, hash)) {
-      return sendError(res, 'username or password is invalid');
-    }
+  // 验证密码hash是否等于提交的密码hash
+  if (!AuthHelper.comparePasswordHash(initialPassword, hash)) {
+    return sendError(res, 'username or password is invalid');
   }
-  // 凭证种子：两种模式下均为 SHA256(明文密码 + '.napcat')
-  const credentialSeed = sharedMode
-    ? AuthHelper.generatePasswordHash(String(password))
-    : String(hash);
 
   // 检查是否启用了2FA
   if (WebUiConfigData.enable2FA && WebUiConfigData.totpSecret) {
@@ -97,7 +75,7 @@ export const LoginHandler: RequestHandler = async (req, res) => {
     }
 
     // 2FA验证成功，签发凭证
-    const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(credentialSeed))).toString('base64');
+    const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(hash))).toString('base64');
     return sendSuccess(res, {
       Credential: signCredential,
       require2FA: false,
@@ -106,7 +84,7 @@ export const LoginHandler: RequestHandler = async (req, res) => {
   }
 
   // 未启用2FA，直接签发凭证
-  const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(credentialSeed))).toString('base64');
+  const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(hash))).toString('base64');
   return sendSuccess(res, {
     Credential: signCredential,
     passwordChangeRequired: getWebUiPasswordChangeRequired(),
@@ -142,18 +120,13 @@ export const checkHandler: RequestHandler = async (req, res) => {
       return sendError(res, 'Token has been revoked');
     }
 
-    // 凭证的密码绑定同鉴权中间件：共用密码模式下不绑定，只校验签名与时效
-    const sharedMode = getWebUiSharedPasswordMode();
-    let expectedHash: string | null = null;
-    if (!sharedMode) {
-      const initialPassword = getInitialWebUiPassword();
-      if (!initialPassword) {
-        return sendError(res, 'Server password not initialized');
-      }
-      expectedHash = AuthHelper.generatePasswordHash(initialPassword);
+    // 使用启动时缓存的密码进行验证
+    const initialPassword = getInitialWebUiPassword();
+    if (!initialPassword) {
+      return sendError(res, 'Server password not initialized');
     }
     // 验证凭证是否在一小时内有效
-    const valid = AuthHelper.validateCredentialWithinOneHour(expectedHash, Credential);
+    const valid = AuthHelper.validateCredentialWithinOneHour(initialPassword, Credential);
     // 返回成功信息
     if (valid) return sendSuccess(res, null);
     // 返回错误信息
@@ -166,12 +139,13 @@ export const checkHandler: RequestHandler = async (req, res) => {
 
 // 修改密码（账户密码登录）
 export const UpdatePasswordHandler: RequestHandler = async (req, res) => {
-  // 共用密码模式下密码以 AstrBot 仪表盘为准，不在本端修改
-  if (getWebUiSharedPasswordMode()) {
-    return sendError(res, '共用密码模式：登录密码以 AstrBot 仪表盘为准，请前往 AstrBot 控制台修改');
-  }
   const { oldPassword, newPassword } = req.body;
   const authorization = req.headers.authorization;
+
+  // 共用密码模式：密码以 AstrBot 控制台为准，不在本面板修改
+  if (isSharedPasswordMode()) {
+    return sendError(res, '密码已与 AstrBot 控制台共用，请在 AstrBot 控制台（统一网关首页 /）修改');
+  }
 
   if (isEmpty(newPassword)) {
     return sendError(res, 'newPassword is empty');
@@ -327,17 +301,12 @@ export const VerifyPasskeyAuthenticationHandler: RequestHandler = async (req, re
     const verification = await PasskeyHelper.verifyAuthentication(userId, response, origin, rpId);
 
     if (verification.verified) {
-      // 凭证种子：独立模式与当前密码绑定；共用密码模式下密码以
-      // AstrBot 为准（服务端不落盘），使用固定标记哈希（校验时不绑定密码）
-      const sharedMode = getWebUiSharedPasswordMode();
+      // 使用与普通登录相同的凭证签发（与当前密码绑定的 hash）
       const initialPassword = getInitialWebUiPassword();
-      if (!sharedMode && !initialPassword) {
+      if (!initialPassword) {
         return sendError(res, 'Server password not initialized');
       }
-      const credentialSeed = sharedMode
-        ? AuthHelper.generatePasswordHash('astrbot-shared-passkey')
-        : AuthHelper.generatePasswordHash(initialPassword);
-      const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(credentialSeed))).toString('base64');
+      const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(AuthHelper.generatePasswordHash(initialPassword)))).toString('base64');
       return sendSuccess(res, {
         Credential: signCredential,
         passwordChangeRequired: getWebUiPasswordChangeRequired(),

@@ -131,14 +131,7 @@ const WebUIConfigCard = () => {
 
   useEffect(() => {
     loadTwoFAStatus();
-    // 查询登录模式：共用密码模式下隐藏本页的改密表单（密码以 AstrBot 为准）
-    WebUIManager.getLoginMode()
-      .then((mode) => setSharedPassword(!!mode?.sharedPassword))
-      .catch(() => { /* 查询失败按独立模式展示 */ });
   }, []);
-
-  // 共用密码模式：登录密码与 AstrBot 仪表盘一致（以 AstrBot 为准）
-  const [sharedPassword, setSharedPassword] = useState<boolean>(false);
 
   // 修改密码独立表单
   const navigate = useNavigate();
@@ -220,18 +213,6 @@ const WebUIConfigCard = () => {
       <title>WebUI配置 - NapCat WebUI</title>
 
       {/* 修改密码区块 - 移到顶部 */}
-      {sharedPassword
-        ? (
-          <div className='flex flex-col gap-4'>
-            <div className='flex-shrink-0 w-full font-bold text-default-600 dark:text-default-400 px-1'>修改密码</div>
-            <div className='text-small text-default-600 dark:text-default-400 px-1'>
-              当前为共用密码模式：登录密码与 AstrBot 仪表盘一致（以 AstrBot 为准），
-              请前往 AstrBot 控制台修改（统一网关部署时把地址栏中的
-              <code>/napcat/webui/...</code> 改为 <code>/</code>）。
-            </div>
-          </div>
-        )
-        : (
       <div className='flex flex-col gap-4'>
         <div className='flex-shrink-0 w-full font-bold text-default-600 dark:text-default-400 px-1'>修改密码</div>
         <Controller
@@ -312,7 +293,6 @@ const WebUIConfigCard = () => {
           </Button>
         </div>
       </div>
-        )}
 
       <div className='flex flex-col gap-2'>
         <div className='flex-shrink-0 w-full font-bold text-default-600 dark:text-default-400 px-1'>背景图</div>

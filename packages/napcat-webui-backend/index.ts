@@ -9,7 +9,6 @@ import { createHash } from 'node:crypto';
 import { createServer as createHttpsServer } from 'https';
 import { NapCatPathWrapper } from 'napcat-common/src/path';
 import { WebUiConfigWrapper } from '@/napcat-webui-backend/src/helper/config';
-import { isSharedPasswordMode } from '@/napcat-webui-backend/src/helper/AstrBotAuth';
 import { ALLRouter } from '@/napcat-webui-backend/src/router';
 import { cors } from '@/napcat-webui-backend/src/middleware/cors';
 import { createUrl } from '@/napcat-webui-backend/src/utils/url';
@@ -63,12 +62,6 @@ let initialWebUiPassword: string = '';
  */
 let webUiPasswordChangeRequired: boolean = false;
 
-/**
- * 共用密码模式（NAPCAT_ASTRBOT_CONFIG 已注入）：
- * 登录密码与 AstrBot 仪表盘一致（以 AstrBot 为准），本服务不生成/存储密码
- */
-let webUiSharedPasswordMode: boolean = false;
-
 export function setInitialWebUiPassword (password: string) {
   initialWebUiPassword = password;
 }
@@ -85,8 +78,13 @@ export function getWebUiPasswordChangeRequired (): boolean {
   return webUiPasswordChangeRequired;
 }
 
-export function getWebUiSharedPasswordMode (): boolean {
-  return webUiSharedPasswordMode;
+/**
+ * 共用密码模式（NapCatQQ-M 一体化栈注入 NAPCAT_SHARED_PASSWORD=1）：
+ * WebUI 密码由栈侧从 AstrBot 控制台同步写入 webui.json，本进程
+ * 不生成初始密码、不提供改密入口，登录前重读磁盘上的最新密码。
+ */
+export function isSharedPasswordMode (): boolean {
+  return process.env['NAPCAT_SHARED_PASSWORD'] === '1';
 }
 
 export async function InitPort (parsedConfig: WebUiConfigType): Promise<[string, number]> {
@@ -143,30 +141,27 @@ export async function InitWebUi (logger: ILogWrapper, pathWrapper: NapCatPathWra
     return;
   }
 
-  // 共用密码模式：登录密码以 AstrBot 仪表盘为准（统一栈注入 NAPCAT_ASTRBOT_CONFIG）
-  if (isSharedPasswordMode()) {
-    webUiSharedPasswordMode = true;
-    setInitialWebUiPassword('');
-    setWebUiPasswordChangeRequired(false);
-    logger.log('[NapCat] [WebUi] WebUI 已启用共用密码模式');
-    logger.log(`[NapCat] [WebUi] 登录账户: ${config.username || 'napcat'}`);
-    logger.log('[NapCat] [WebUi] 登录密码与 AstrBot 仪表盘一致（以 AstrBot 为准，请勿在此修改）');
-  } else {
-    // 优先使用环境变量 NAPCAT_WEBUI_PASSWORD 指定 WebUI 密码（Docker 等无人值守场景）
-    const envPassword = process.env['NAPCAT_WEBUI_PASSWORD'];
-    if (envPassword) {
-      const envPasswordError = validateWebUiPassword(envPassword);
-      if (envPasswordError) {
-        logger.log(`[NapCat] [WebUi] 环境变量 NAPCAT_WEBUI_PASSWORD 不符合策略（${envPasswordError}），已忽略`);
-      } else if (config.password !== envPassword) {
-        await WebUiConfig.UpdateWebUIConfig({ password: envPassword });
-        logger.log('[NapCat] [WebUi] 已通过环境变量 NAPCAT_WEBUI_PASSWORD 设置 WebUI 密码');
-        config = await WebUiConfig.GetWebUIConfig();
-      }
+  // 优先使用环境变量 NAPCAT_WEBUI_PASSWORD 指定 WebUI 密码（Docker 等无人值守场景）
+  const envPassword = process.env['NAPCAT_WEBUI_PASSWORD'];
+  if (envPassword) {
+    const envPasswordError = validateWebUiPassword(envPassword);
+    if (envPasswordError) {
+      logger.log(`[NapCat] [WebUi] 环境变量 NAPCAT_WEBUI_PASSWORD 不符合策略（${envPasswordError}），已忽略`);
+    } else if (config.password !== envPassword) {
+      await WebUiConfig.UpdateWebUIConfig({ password: envPassword });
+      logger.log('[NapCat] [WebUi] 已通过环境变量 NAPCAT_WEBUI_PASSWORD 设置 WebUI 密码');
+      config = await WebUiConfig.GetWebUIConfig();
     }
+  }
 
-    // 密码为空（首次部署/旧版本升级）时生成随机初始密码并输出到控制台
-    if (!config.password) {
+  // 密码为空（首次部署/旧版本升级）时生成随机初始密码并输出到控制台
+  if (!config.password) {
+    if (isSharedPasswordMode()) {
+      // 共用密码模式：密码由 AstrBot 侧写入，本进程不生成初始密码
+      logger.log('[NapCat] [WebUi] WebUI 已启用账户密码登录（与 AstrBot 共用密码）');
+      logger.log(`[NapCat] [WebUi] 登录账户: ${config.username || 'napcat'}`);
+      logger.log('[NapCat] [WebUi] 密码与 AstrBot 控制台共用：请先登录一次 AstrBot（统一网关首页 /），即可用同一密码登录本页');
+    } else {
       const initialPassword = generateWebUiPassword();
       await WebUiConfig.UpdateWebUIConfig({
         password: initialPassword,
@@ -179,11 +174,19 @@ export async function InitWebUi (logger: ILogWrapper, pathWrapper: NapCatPathWra
       logger.log('[NapCat] [WebUi] 首次登录后请立即修改密码（需包含英文和数字，长度 6-12 位）');
       config = await WebUiConfig.GetWebUIConfig();
     }
-
-    // 存储启动时的初始密码与强制改密标记用于鉴权
-    setInitialWebUiPassword(config.password);
-    setWebUiPasswordChangeRequired(!!config.passwordChangeRequired);
+  } else if (isSharedPasswordMode()) {
+    logger.log('[NapCat] [WebUi] 密码与 AstrBot 控制台共用（修改密码请前往 AstrBot 控制台）');
   }
+
+  // 共用密码模式下不强制改密（密码管理权在 AstrBot 侧）
+  if (isSharedPasswordMode() && config.passwordChangeRequired) {
+    await WebUiConfig.UpdateWebUIConfig({ passwordChangeRequired: false });
+    config = await WebUiConfig.GetWebUIConfig();
+  }
+
+  // 存储启动时的初始密码与强制改密标记用于鉴权
+  setInitialWebUiPassword(config.password);
+  setWebUiPasswordChangeRequired(!!config.passwordChangeRequired);
 
   const [host, port] = await InitPort(config);
   webUiRuntimePort = port;

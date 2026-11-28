@@ -63,23 +63,31 @@ pnpm build:plugin-builtin
 
 `packages/napcat-vite/vite-plugin-version.js` 原本从 `NapNeko/NapCatQQ` 的 tags 取版本，上游删库后回退成 `1.0.0-dev`。现在默认读本仓库 tags，兜底 `4.18.4`；需要换维护仓库时用 `NAPCAT_REPO_OWNER` / `NAPCAT_REPO_NAME` 覆盖。
 
-## 相对上游的 WebUI 登录改造
+## 本 fork 相对上游的功能改动
 
-两轮改造，均向后兼容（不设置环境变量时保持独立账户密码登录）：
+### v4.18.43：WebUI 账户密码登录
 
-1. **账户密码登录**（v4.18.43）：由上游单 token 改为「账户 + 密码」，默认账户
-   `napcat`；独立部署时初始密码自动生成并打印到控制台，首次登录强制改密
-   （密码需含英文和数字，长度 6-12 位）。
-2. **共用密码模式**（v4.18.44，配合 NapCat-M Stack）：设置环境变量
-   `NAPCAT_ASTRBOT_CONFIG` 指向 AstrBot 的 `data/cmd_config.json` 后，
-   登录密码与 AstrBot 仪表盘**完全一致、以 AstrBot 为准**：
-   - 后端按文件 mtime 实时重读，AstrBot 控制台改密后无需重启即生效；
-   - 哈希校验对齐 `astrbot/core/utils/auth_password.py`（PBKDF2-SHA256
-     600k 轮优先，MD5 旧存储回退）；
-   - 本端不再生成/存储密码，`/auth/update_password` 拒绝执行并引导前往
-     AstrBot 改密；登录页经 `/auth/login_mode`（免鉴权）自适应文案；
-   - 登录凭证仍为 1 小时有效的 HMAC 签名，共用模式下不做密码绑定
-     （服务端不落盘明文，无法比对）。
+登录方式由单 token 改为「账户 + 密码」（默认账户 `napcat`）：首次启动生成随机
+初始密码并打印到控制台，首次登录后强制修改（需包含英文和数字，长度 6-12 位），
+密码存于 `webui.json`。登录凭证使用独立存储键 `napcat-token`，与其它同域面板
+互不干扰；统一网关（同端口反代）下还会在侧边栏顶部提供「AstrBot 控制台」入口。
+
+### v4.18.45：共用密码模式（供 NapCatQQ-M 一体化栈使用）
+
+环境变量 `NAPCAT_SHARED_PASSWORD=1` 时启用（由一体化栈的
+`stack/napcat_process.py` 注入）：
+
+- 启动时**不再生成/打印**自己的初始密码，日志提示密码与 AstrBot 控制台共用
+- **登录前重读** `webui.json`（新增 `WebUiConfig.ReloadWebUIConfig()`），
+  栈侧从 AstrBot 同步新密码后无需重启即可用新密码登录
+- `POST /api/auth/update_password` 直接拒绝并提示前往 AstrBot 控制台修改
+- 文件编辑器写回 `webui.json` 时以**磁盘上的最新密码**为准（避免内存旧值
+  覆盖栈侧刚同步的新密码）
+- 不带该环境变量启动时，行为与 v4.18.43 完全一致（自管初始密码）
+
+实现位置：`packages/napcat-webui-backend/`（`index.ts` 的
+`isSharedPasswordMode()`、`src/api/Auth.ts`、`src/api/File.ts`、
+`src/helper/config.ts`）。
 
 ## 相关
 

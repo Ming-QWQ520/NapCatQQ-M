@@ -9,7 +9,7 @@ import { PassThrough } from 'stream';
 import multer from 'multer';
 import webUIFontUploader from '../uploader/webui_font';
 import diskUploader from '../uploader/disk';
-import { WebUiConfig, getInitialWebUiPassword, webUiPathWrapper } from '@/napcat-webui-backend/index';
+import { WebUiConfig, getInitialWebUiPassword, webUiPathWrapper, isSharedPasswordMode } from '@/napcat-webui-backend/index';
 
 const isWindows = os.platform() === 'win32';
 
@@ -372,8 +372,11 @@ export const WriteFileHandler: RequestHandler = async (req, res) => {
       try {
         // 解析要写入的配置
         const configToWrite = JSON.parse(content);
-        // 获取内存中的密码，覆盖前端传来的密码（防止文件编辑器写回过期凭据）
-        const memoryPassword = getInitialWebUiPassword();
+        // 获取密码，覆盖前端传来的密码（防止文件编辑器写回过期凭据）：
+        // 共用密码模式下以磁盘上的最新密码为准（栈侧随时可能从 AstrBot 同步新密码）
+        const memoryPassword = isSharedPasswordMode()
+          ? ((await WebUiConfig.ReloadWebUIConfig()).password || getInitialWebUiPassword())
+          : getInitialWebUiPassword();
         if (memoryPassword) {
           configToWrite.password = memoryPassword;
         }

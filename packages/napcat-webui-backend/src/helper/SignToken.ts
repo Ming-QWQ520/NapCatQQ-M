@@ -54,14 +54,12 @@ export class AuthHelper {
   }
 
   /**
-     * 验证凭证在1小时内有效，且（可选）与指定密码哈希绑定。
-     * @param expectedHash 期望的密码哈希（SHA256(密码 + '.napcat')）；
-     *                    传 null 表示不与密码绑定（共用密码模式下密码以
-     *                    AstrBot 为准，服务端不落盘，无法做绑定比对）
+     * 验证凭证在1小时内有效且token与原始token相同。
+     * @param token 待验证的原始token。
      * @param credentialJson 已签名的凭证JSON对象。
-     * @returns 布尔值，表示凭证是否有效。
+     * @returns 布尔值，表示凭证是否有效且token匹配。
      */
-  public static validateCredentialWithinOneHour (expectedHash: string | null, credentialJson: WebUiCredentialJson): boolean {
+  public static validateCredentialWithinOneHour (token: string, credentialJson: WebUiCredentialJson): boolean {
     // 首先检查凭证是否被篡改
     const isValid = AuthHelper.checkCredential(credentialJson);
     if (!isValid) {
@@ -77,13 +75,7 @@ export class AuthHelper {
     const createdTimeSeconds = Math.floor(Number(credentialJson.Data.CreatedTime));
     const timeDifferenceSeconds = currentTimeSeconds - createdTimeSeconds;
     const isWithinOneHour = timeDifferenceSeconds >= 0 && timeDifferenceSeconds <= AuthHelper.MAX_CREDENTIAL_VALID_SECONDS;
-    if (!isWithinOneHour) {
-      return false;
-    }
-    if (expectedHash === null) {
-      return true;
-    }
-    return AuthHelper.timingSafeEqualString(credentialJson.Data.HashEncoded, expectedHash);
+    return isWithinOneHour && AuthHelper.timingSafeEqualString(credentialJson.Data.HashEncoded, AuthHelper.generatePasswordHash(token));
   }
 
   /**
